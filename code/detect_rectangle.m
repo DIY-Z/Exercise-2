@@ -1,68 +1,113 @@
-% % clc;
-close all;
-clear all;
+% 读取图像
+image = imread('img2.png');
 
-i=imread('img.png');
-imshow(i)
+% 将图像转换为灰度图像
+grayImage = rgb2gray(image);
+
 % 去噪处理
-denoisedImage = medfilt2(rgb2gray(i));
+denoisedImage = medfilt2(grayImage);
 
-% show image
-imshow(denoisedImage)
+figure;
+imshow(denoisedImage);
 hold on;
 
-edgeImage = edge(denoisedImage, 'canny');
+% 使用腐蚀操作来消除分散的点
+seD = strel('diamond',1);
+BWfinal = imerode(denoisedImage,seD);
+% figure;
+% imshow(BWfinal);
+% hold on;
 
-% imshow(edgeImage)
-
-boundaries = bwboundaries(edgeImage);
-
-rectangles = [];
-thresholdArea = 80;
-thresholdPerimeter = 20;
-thresholdOrientation = 70;
+% 先检测矩形的角点
+corners = detectMinEigenFeatures(BWfinal);
+rectangle_corners = corners.selectStrongest(8);
+locations = rectangle_corners.Location;
+plot(rectangle_corners);
+hold on;
 
 
-for k = 1:length(boundaries)
-    boundary = boundaries{k};
-    % 创建一个二值图像，将当前边界点集置为白色，其他部分为黑色
-    binaryImage = zeros(size(edgeImage));
-    binaryImage(boundary(:,1) + size(edgeImage, 1)*(boundary(:,2)-1)) = 1;
-    
-    % 计算轮廓的特征
-    stats = regionprops(binaryImage, 'Area', 'Perimeter', 'BoundingBox');
-    tmp1 = stats.BoundingBox;
-    tmp2 = stats.Area;
-    tmp3 = stats.Perimeter;
-    % 根据特征进行筛选
-    if (stats.Area > thresholdArea && stats.Perimeter > thresholdPerimeter && isrectangle(stats.BoundingBox)) 
-        % 计算近似的旋转角度
-        orientation = abs(atand((stats.BoundingBox(4) - stats.BoundingBox(2)) / (stats.BoundingBox(3) - stats.BoundingBox(1))));
-        
-        % 判断角度是否接近于90度（可根据需要调整阈值）
-        if (orientation > (90 - thresholdOrientation) )
-            rectangles = [rectangles; stats.BoundingBox];
-        end
-        % rectangles = [rectangles; stats.BoundingBox];
-    end
+% 设置要聚类的簇的数量
+k = 2;
+% 使用 k-means 进行聚类
+[idx, centroids] = kmeans(locations, k, "Distance","cosine");
+
+% 将角点分为两类
+cluster1 = locations(idx == 1, :);
+cluster2 = locations(idx == 2, :);
+
+% 绘制结果
+% figure;
+% scatter(cluster1(:, 1), cluster1(:, 2), 'r');
+% hold on;
+% scatter(cluster2(:, 1), cluster2(:, 2), 'b');
+% scatter(centroids(:, 1), centroids(:, 2), 'k', 'filled');
+% legend('Cluster 1', 'Cluster 2', 'Centroids');
+% xlabel('X');
+% ylabel('Y');
+% title('Clustering Result');
+
+k1 = convhull(double(cluster1));
+plot(cluster1(k1,1),cluster1(k1,2), 'LineWidth', 3, 'LineStyle','-');
+
+k2 = convhull(double(cluster2));
+plot(cluster2(k2,1),cluster2(k2,2), 'LineWidth', 3, 'LineStyle','-');
+
+
+%% 对第一个矩形进行计算
+% 去掉列表k的最后一个元素
+k1 = k1(1:end-1);
+% 根据索引提取凸包的顶点坐标
+convhull_vertices1 = cluster1(k1, :);
+% 计算凸包的边长信息
+edge_lengths = zeros(size(convhull_vertices1, 1), 1);
+for i = 1:size(convhull_vertices1, 1)
+    x1 = convhull_vertices1(i, 1);
+    y1 = convhull_vertices1(i, 2);
+    x2 = convhull_vertices1(mod(i, size(convhull_vertices1, 1)) + 1, 1);
+    y2 = convhull_vertices1(mod(i, size(convhull_vertices1, 1)) + 1, 2);
+    distance = sqrt((x2 - x1)^2 + (y2 - y1)^2);
+    edge_lengths(i) = distance;
 end
 
-for k = 1:size(rectangles, 1)
-    rectangle('Position', rectangles(k,:), 'EdgeColor', 'r', 'LineWidth', 2);
+% 计算矩形的边长信息
+min_edge_length = min(edge_lengths);
+max_edge_length = max(edge_lengths);
+
+% 计算矩形的质心坐标
+centroid = mean(convhull_vertices1);
+
+% 打印结果
+disp('第一个矩形:');
+disp(['最小边长: ', num2str(min_edge_length)]);
+disp(['最大边长: ', num2str(max_edge_length)]);
+fprintf('质心坐标: (%f,%f)\n', centroid(1), centroid(2))
+
+%% 对第二个矩形进行计算
+% 去掉列表k的最后一个元素
+k2 = k2(1:end-1);
+% 根据索引提取凸包的顶点坐标
+convhull_vertices2 = cluster2(k2, :);
+% 计算凸包的边长信息
+edge_lengths = zeros(size(convhull_vertices2, 1), 1);
+for i = 1:size(convhull_vertices2, 1)
+    x1 = convhull_vertices2(i, 1);
+    y1 = convhull_vertices2(i, 2);
+    x2 = convhull_vertices2(mod(i, size(convhull_vertices2, 1)) + 1, 1);
+    y2 = convhull_vertices2(mod(i, size(convhull_vertices2, 1)) + 1, 2);
+    distance = sqrt((x2 - x1)^2 + (y2 - y1)^2);
+    edge_lengths(i) = distance;
 end
-hold off;
 
+% 计算矩形的边长信息
+min_edge_length = min(edge_lengths);
+max_edge_length = max(edge_lengths);
 
-function result = isrectangle(boundingBox)
-    % 提取矩形的位置和尺寸
-    x = boundingBox(1);
-    y = boundingBox(2);
-    width = boundingBox(3);
-    height = boundingBox(4);
-    
-    % 检查是否为矩形
-    isRectangle = abs(width - height) > 7 && width > 40 && height > 20;
-    
-    result = isRectangle;
-end
+% 计算矩形的质心坐标
+centroid = mean(convhull_vertices2);
 
+% 打印结果
+disp('第二个矩形:');
+disp(['最小边长: ', num2str(min_edge_length)]);
+disp(['最大边长: ', num2str(max_edge_length)]);
+% disp(['质心坐标: ', num2str(centroid)]);
+fprintf('质心坐标: (%f,%f)\n', centroid(1), centroid(2))
